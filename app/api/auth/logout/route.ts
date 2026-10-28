@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { clearSessionCookie } from "@/lib/auth";
 
 export async function POST() {
@@ -7,8 +7,8 @@ export async function POST() {
   return response;
 }
 
-export async function GET() {
-  const response = NextResponse.redirect(new URL("/?msg=logged_out", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"));
+export async function GET(request: NextRequest) {
+  const response = NextResponse.redirect(new URL("/?msg=logged_out", request.url));
   clearSessionCookie(response);
   return response;
 }
