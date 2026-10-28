@@ -1,0 +1,69 @@
+datasource db {
+  provider = "postgresql" // Switch to "mysql" if using PlanetScale / Aiven MySQL
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum AccountType {
+  SAVINGS
+  CHECKING
+  LOAN
+}
+
+enum AccountStatus {
+  ACTIVE
+  BLOCKED
+  CLOSED
+}
+
+enum TransactionType {
+  TRANSFER
+  DEPOSIT
+  WITHDRAWAL
+}
+
+model User {
+  id           Int       @id @default(autoincrement()) @map("USER_ID")
+  firstName    String    @map("FIRST_NAME") @db.VarChar(255)
+  lastName     String    @map("LAST_NAME") @db.VarChar(255)
+  aadhaarNo    String    @unique @map("AADHAAR_NO") @db.VarChar(12)
+  email        String    @unique @map("EMAIL") @db.VarChar(255)
+  passwordHash String    @map("PASSWORD_HASH") @db.VarChar(255)
+  createdAt    DateTime  @default(now()) @map("CREATED_AT")
+
+  accounts     Account[]
+
+  @@map("USERS")
+}
+
+model Account {
+  accountNo    Int           @id @map("ACCOUNT_NO")
+  userId       Int           @map("USER_ID")
+  accountType  AccountType   @default(SAVINGS) @map("ACCOUNT_TYPE")
+  balance      Decimal       @default(0.00) @map("BALANCE") @db.Decimal(15, 2)
+  status       AccountStatus @default(ACTIVE) @map("STATUS")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sentTx       Transaction[] @relation("SenderAccount")
+  receivedTx   Transaction[] @relation("ReceiverAccount")
+
+  @@map("ACCOUNTS")
+}
+
+model Transaction {
+  id              Int             @id @default(autoincrement()) @map("ID")
+  senderAccount   Int?            @map("SENDER_ACCOUNT")
+  receiverAccount Int?            @map("RECEIVER_ACCOUNT")
+  amount          Decimal         @map("AMOUNT") @db.Decimal(15, 2)
+  txType          TransactionType @map("TX_TYPE")
+  remark          String?         @map("REMARK") @db.VarChar(255)
+  createdAt       DateTime        @default(now()) @map("CREATED_AT")
+
+  sender          Account?        @relation("SenderAccount", fields: [senderAccount], references: [accountNo])
+  receiver        Account?        @relation("ReceiverAccount", fields: [receiverAccount], references: [accountNo])
+
+  @@map("TRANSACTIONS")
+}

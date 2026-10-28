@@ -1,0 +1,50 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Sun, Moon } from "lucide-react";
+
+export default function ThemeToggle() {
+  const [isDark, setIsDark] = useState<boolean>(false);
+  const [mounted, setMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const savedTheme = localStorage.getItem("theme");
+    const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+    if (savedTheme === "dark" || (!savedTheme && systemPrefersDark)) {
+      setIsDark(true);
+      document.documentElement.classList.add("dark");
+    } else {
+      setIsDark(false);
+      document.documentElement.classList.remove("dark");
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    if (isDark) {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme", "light");
+      setIsDark(false);
+    } else {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
+      setIsDark(true);
+    }
+  };
+
+  if (!mounted) {
+    return <div className="w-9 h-9" />;
+  }
+
+  return (
+    <button
+      onClick={toggleTheme}
+      type="button"
+      aria-label="Toggle Dark Mode"
+      className="p-2 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+    >
+      {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+    </button>
+  );
+}
