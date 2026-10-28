@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import BalanceCounter from "@/components/BalanceCounter";
 import AlertBanner from "@/components/AlertBanner";
+import DebitCard from "@/components/DebitCard";
+import AccountDetailsBadge from "@/components/AccountDetailsBadge";
+import BankingCalculators from "@/components/BankingCalculators";
 import {
   Wallet,
   ArrowDownCircle,
@@ -12,10 +16,14 @@ import {
   Download,
   Clock,
   CheckCircle2,
-  AlertCircle,
+  FileText,
+  Search,
+  Filter,
   Loader2,
   TrendingDown,
   TrendingUp,
+  Database,
+  ArrowRight,
 } from "lucide-react";
 
 interface Transaction {
@@ -54,6 +62,10 @@ export default function DashboardPage() {
   const [isDepositing, setIsDepositing] = useState<boolean>(false);
   const [isTransferring, setIsTransferring] = useState<boolean>(false);
   const [isWithdrawing, setIsWithdrawing] = useState<boolean>(false);
+
+  // Filter & Search states
+  const [searchTerm, setSearchTerm] = useState<string>("");
+  const [selectedFilter, setSelectedFilter] = useState<"ALL" | "DEPOSIT" | "WITHDRAWAL" | "TRANSFER">("ALL");
 
   // Feedback alerts
   const [alert, setAlert] = useState<{ type: "success" | "error"; message: string } | null>(
@@ -175,7 +187,7 @@ export default function DashboardPage() {
         <div className="flex-1 flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-            <p className="text-sm font-medium text-slate-500">Loading secure dashboard...</p>
+            <p className="text-sm font-medium text-slate-500">Loading secure digital banking dashboard...</p>
           </div>
         </div>
       </div>
@@ -183,6 +195,19 @@ export default function DashboardPage() {
   }
 
   if (!data) return null;
+
+  // Filtered transactions
+  const filteredTransactions = data.transactions.filter((tx) => {
+    const matchesFilter = selectedFilter === "ALL" || tx.txType === selectedFilter;
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch =
+      searchTerm === "" ||
+      (tx.remark || "").toLowerCase().includes(searchLower) ||
+      String(tx.senderAccount).includes(searchLower) ||
+      String(tx.receiverAccount).includes(searchLower) ||
+      String(tx.amount).includes(searchLower);
+    return matchesFilter && matchesSearch;
+  });
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-[#0b0f19] text-slate-900 dark:text-slate-100 transition-colors">
@@ -193,16 +218,29 @@ export default function DashboardPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Hello, {data.firstName}!
+              Welcome, {data.firstName} {data.lastName}
             </h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Account: <span className="acc-badge">#{data.accountNumber}</span>
+              Account: <span className="acc-badge">#{data.accountNumber}</span> • High-Yield Digital Savings
             </p>
           </div>
 
-          <div className="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-            <Clock className="w-3.5 h-3.5" />
-            <span>Active Session • Savings Account</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link
+              href="/dashboard/statement"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 hover:bg-blue-100 transition"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Official Statement</span>
+            </Link>
+
+            <Link
+              href="/admin/database"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 transition"
+            >
+              <Database className="w-3.5 h-3.5 text-blue-500" />
+              <span>Database Records</span>
+            </Link>
           </div>
         </div>
 
@@ -215,38 +253,52 @@ export default function DashboardPage() {
           />
         )}
 
-        {/* 4-Card Banking Grid (Exact replica of Home.jsp) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Card 1: Balance Card */}
-          <div className="bank-card flex flex-col justify-between border-blue-500/20 dark:border-blue-900/40">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Total Balance
-              </h3>
-              <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
-                <Wallet className="w-5 h-5" />
+        {/* Top Hero Section: Balance Card & Virtual Debit Card */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left Column: Total Balance & Branch Information */}
+          <div className="lg:col-span-7 space-y-6">
+            <div className="bank-card p-6 border-blue-500/20 dark:border-blue-900/40 relative overflow-hidden">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Total Available Balance
+                </span>
+                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+                  <Wallet className="w-5 h-5" />
+                </div>
               </div>
-            </div>
 
-            <div className="my-4">
-              <div className="text-3xl sm:text-4xl font-extrabold text-blue-600 dark:text-blue-400 flex items-center">
+              <div className="text-3xl sm:text-5xl font-black text-blue-600 dark:text-blue-400 flex items-center">
                 <span>₹</span>
                 <span className="ml-1">
                   <BalanceCounter value={data.balance} />
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Available for withdrawal
-              </p>
+
+              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Real-Time Cloud Ledger Synced</span>
+                </span>
+                <span>Tier-1 Interest: 6.50% p.a.</span>
+              </div>
             </div>
 
-            <div className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Real-Time Balance Synced</span>
-            </div>
+            <AccountDetailsBadge accountNumber={data.accountNumber} />
           </div>
 
-          {/* Card 2: Quick Deposit */}
+          {/* Right Column: Interactive Virtual Platinum Debit Card */}
+          <div className="lg:col-span-5">
+            <DebitCard
+              firstName={data.firstName}
+              lastName={data.lastName}
+              accountNumber={data.accountNumber}
+            />
+          </div>
+        </div>
+
+        {/* 3 Banking Action Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Card 1: Quick Deposit */}
           <div className="bank-card flex flex-col justify-between">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -285,15 +337,15 @@ export default function DashboardPage() {
             </form>
 
             <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2">
-              Instant credit to your savings account
+              Instant credit with zero transaction charge
             </p>
           </div>
 
-          {/* Card 3: Send Money / Transfer */}
+          {/* Card 2: Send Money / Transfer */}
           <div className="bank-card flex flex-col justify-between">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Send Money
+                Send Money (IMPS/NEFT)
               </h3>
               <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
                 <Send className="w-5 h-5" />
@@ -303,7 +355,7 @@ export default function DashboardPage() {
             <form onSubmit={handleTransfer} className="space-y-3">
               <input
                 type="text"
-                placeholder="Recipient Account No"
+                placeholder="Recipient Account No (8-digit)"
                 value={transferAccount}
                 onChange={(e) => setTransferAccount(e.target.value)}
                 required
@@ -335,11 +387,11 @@ export default function DashboardPage() {
             </form>
           </div>
 
-          {/* Card 4: Withdraw Money */}
+          {/* Card 3: Withdraw Money */}
           <div className="bank-card flex flex-col justify-between">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Withdraw Money
+                ATM / Cash Withdrawal
               </h3>
               <div className="p-2 rounded-lg bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
                 <CreditCard className="w-5 h-5" />
@@ -372,7 +424,7 @@ export default function DashboardPage() {
             </form>
 
             <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-2 flex items-center justify-between">
-              <span>Daily Limit: ₹{data.dailyLimit}</span>
+              <span>Daily Cap: ₹{data.dailyLimit}</span>
               <span className="font-semibold text-rose-500">
                 Rem: ₹{data.dailyRemaining.toFixed(2)}
               </span>
@@ -380,24 +432,67 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Transactions Table Section (Exact replica of Home.jsp) */}
+        {/* Banking Tools & Financial Calculators */}
+        <BankingCalculators />
+
+        {/* Transactions Ledger with Search & Filter Tabs */}
         <section className="bank-card p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
             <div>
-              <h3 className="text-lg font-bold">Recent Transactions</h3>
+              <h3 className="text-lg font-bold">Transaction Ledger</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                All inward and outward banking movements
+                Audit history of all deposits, withdrawals, and inter-bank transfers
               </p>
             </div>
 
-            <a
-              href="/api/account/statement/csv"
-              download
-              className="inline-flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition"
-            >
-              <Download className="w-4 h-4" />
-              <span>Download CSV</span>
-            </a>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <Link
+                href="/dashboard/statement"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 hover:bg-blue-100 transition"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Printable Statement</span>
+              </Link>
+
+              <a
+                href="/api/account/statement/csv"
+                download
+                className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>CSV</span>
+              </a>
+            </div>
+          </div>
+
+          {/* Search bar & Type Filters */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs font-semibold">
+              {(["ALL", "DEPOSIT", "TRANSFER", "WITHDRAWAL"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setSelectedFilter(tab)}
+                  className={`px-3 py-1 rounded-md transition ${
+                    selectedFilter === tab
+                      ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  }`}
+                >
+                  {tab === "ALL" ? "All" : tab}
+                </button>
+              ))}
+            </div>
+
+            <div className="relative w-full sm:w-64">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search transactions..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -411,15 +506,15 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                {data.transactions.length === 0 ? (
+                {filteredTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-8 text-center text-slate-400">
-                      No transactions recorded yet. Perform a quick deposit to get started!
+                    <td colSpan={4} className="py-8 text-center text-slate-400 text-xs">
+                      No matching transactions found.
                     </td>
                   </tr>
                 ) : (
-                  data.transactions.map((tx) => {
-                    const isDebit = tx.senderAccount === data.accountNumber;
+                  filteredTransactions.map((tx) => {
+                    const isDebit = tx.senderAccount === data.accountNumber && tx.txType !== "DEPOSIT";
                     const isTransfer = tx.txType === "TRANSFER";
 
                     let refText = tx.remark || "";
