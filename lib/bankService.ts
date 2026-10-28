@@ -30,76 +30,206 @@ export interface TransactionItem {
 }
 
 // -----------------------------------------------------------------------------
+// Auto Schema Initializer (Ensures Tables Exist without Manual SQL)
+// -----------------------------------------------------------------------------
+export async function initDatabaseSchema(): Promise<{ success: boolean; message: string }> {
+  if (!process.env.DATABASE_URL) {
+    return {
+      success: false,
+      message: "DATABASE_URL is not defined in Vercel Environment Variables.",
+    };
+  }
+
+  try {
+    const isPostgres =
+      process.env.DATABASE_URL.startsWith("postgres://") ||
+      process.env.DATABASE_URL.startsWith("postgresql://");
+
+    if (isPostgres) {
+      // Create PostgreSQL Enum Types safely
+      await prisma.$executeRawUnsafe(`
+        DO $$ BEGIN
+          CREATE TYPE "AccountType" AS ENUM ('SAVINGS', 'CHECKING', 'LOAN');
+        EXCEPTION WHEN duplicate_object THEN null; END $$;
+      `);
+      await prisma.$executeRawUnsafe(`
+        DO $$ BEGIN
+          CREATE TYPE "AccountStatus" AS ENUM ('ACTIVE', 'BLOCKED', 'CLOSED');
+        EXCEPTION WHEN duplicate_object THEN null; END $$;
+      `);
+      await prisma.$executeRawUnsafe(`
+        DO $$ BEGIN
+          CREATE TYPE "TransactionType" AS ENUM ('TRANSFER', 'DEPOSIT', 'WITHDRAWAL');
+        EXCEPTION WHEN duplicate_object THEN null; END $$;
+      `);
+
+      // Create Tables
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "USERS" (
+          "USER_ID" SERIAL PRIMARY KEY,
+          "FIRST_NAME" VARCHAR(255) NOT NULL,
+          "LAST_NAME" VARCHAR(255) NOT NULL,
+          "AADHAAR_NO" VARCHAR(12) UNIQUE NOT NULL,
+          "EMAIL" VARCHAR(255) UNIQUE NOT NULL,
+          "PASSWORD_HASH" VARCHAR(255) NOT NULL,
+          "CREATED_AT" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "ACCOUNTS" (
+          "ACCOUNT_NO" INT PRIMARY KEY,
+          "USER_ID" INT NOT NULL REFERENCES "USERS"("USER_ID") ON DELETE CASCADE,
+          "ACCOUNT_TYPE" "AccountType" DEFAULT 'SAVINGS',
+          "BALANCE" DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          "STATUS" "AccountStatus" DEFAULT 'ACTIVE'
+        );
+      `);
+
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "TRANSACTIONS" (
+          "ID" SERIAL PRIMARY KEY,
+          "SENDER_ACCOUNT" INT NULL REFERENCES "ACCOUNTS"("ACCOUNT_NO"),
+          "RECEIVER_ACCOUNT" INT NULL REFERENCES "ACCOUNTS"("ACCOUNT_NO"),
+          "AMOUNT" DECIMAL(15, 2) NOT NULL,
+          "TX_TYPE" "TransactionType" NOT NULL,
+          "REMARK" VARCHAR(255),
+          "CREATED_AT" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    } else {
+      // MySQL Table Creation
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS USERS (
+          USER_ID INT AUTO_INCREMENT PRIMARY KEY,
+          FIRST_NAME VARCHAR(255) NOT NULL,
+          LAST_NAME VARCHAR(255) NOT NULL,
+          AADHAAR_NO VARCHAR(12) UNIQUE NOT NULL,
+          EMAIL VARCHAR(255) UNIQUE NOT NULL,
+          PASSWORD_HASH VARCHAR(255) NOT NULL,
+          CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS ACCOUNTS (
+          ACCOUNT_NO INT PRIMARY KEY,
+          USER_ID INT NOT NULL,
+          ACCOUNT_TYPE ENUM('SAVINGS', 'CHECKING', 'LOAN') DEFAULT 'SAVINGS',
+          BALANCE DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+          STATUS ENUM('ACTIVE', 'BLOCKED', 'CLOSED') DEFAULT 'ACTIVE',
+          FOREIGN KEY (USER_ID) REFERENCES USERS(USER_ID) ON DELETE CASCADE
+        );
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS TRANSACTIONS (
+          ID INT AUTO_INCREMENT PRIMARY KEY,
+          SENDER_ACCOUNT INT NULL,
+          RECEIVER_ACCOUNT INT NULL,
+          AMOUNT DECIMAL(15, 2) NOT NULL,
+          TX_TYPE ENUM('TRANSFER', 'DEPOSIT', 'WITHDRAWAL') NOT NULL,
+          REMARK VARCHAR(255),
+          CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    }
+
+    return { success: true, message: "Database tables verified/created successfully." };
+  } catch (err: any) {
+    console.error("Auto schema initialization failed:", err);
+    return { success: false, message: err?.message || "Failed to initialize schema." };
+  }
+}
+
+// -----------------------------------------------------------------------------
 // 1. Authentication
 // -----------------------------------------------------------------------------
 export async function authenticate(
   accountNo: number,
   plainPassword: string
 ): Promise<LoginResult | null> {
-  const account = await prisma.account.findUnique({
-    where: { accountNo },
-    include: { user: true },
-  });
+  try {
+    const account = await prisma.account.findUnique({
+      where: { accountNo },
+      include: { user: true },
+    });
 
-  if (!account || !account.user) {
+    if (!account || !account.user) {
+      return null;
+    }
+
+    const isMatch = await verifyPassword(plainPassword, account.user.passwordHash);
+    if (!isMatch) {
+      return null;
+    }
+
+    return {
+      userId: account.user.id,
+      accountNumber: account.accountNo,
+      firstName: account.user.firstName,
+      lastName: account.user.lastName,
+      email: account.user.email,
+      balance: Number(account.balance),
+    };
+  } catch (err: any) {
+    console.error("Authentication error:", err);
+    // If relation does not exist, try auto-init once
+    if (String(err?.message).includes("does not exist")) {
+      await initDatabaseSchema();
+    }
     return null;
   }
-
-  const isMatch = await verifyPassword(plainPassword, account.user.passwordHash);
-  if (!isMatch) {
-    return null;
-  }
-
-  return {
-    userId: account.user.id,
-    accountNumber: account.accountNo,
-    firstName: account.user.firstName,
-    lastName: account.user.lastName,
-    email: account.user.email,
-    balance: Number(account.balance),
-  };
 }
 
 // -----------------------------------------------------------------------------
-// 2. User Registration
+// 2. User Registration (Self-Healing with Auto Table Creation)
 // -----------------------------------------------------------------------------
-export async function registerUser(data: {
-  firstName: string;
-  lastName: string;
-  aadhaarNo: string;
-  email: string;
-  password: string;
-}): Promise<{ success: boolean; result?: LoginResult; error?: string }> {
-  // Check if email or Aadhaar already registered
-  const existingUser = await prisma.user.findFirst({
-    where: {
-      OR: [{ email: data.email }, { aadhaarNo: data.aadhaarNo }],
-    },
-  });
-
-  if (existingUser) {
-    if (existingUser.email === data.email) {
-      return { success: false, error: "An account with this email already exists." };
-    }
-    return { success: false, error: "An account with this Aadhaar number already exists." };
+export async function registerUser(
+  data: {
+    firstName: string;
+    lastName: string;
+    aadhaarNo: string;
+    email: string;
+    password: string;
+  },
+  hasRetried = false
+): Promise<{ success: boolean; result?: LoginResult; error?: string }> {
+  if (!process.env.DATABASE_URL) {
+    return {
+      success: false,
+      error: "Database not connected. Please set DATABASE_URL in Vercel Project Settings > Environment Variables.",
+    };
   }
-
-  // Generate 8-digit unique account number
-  let accountNumber = Math.floor(10000000 + Math.random() * 90000000);
-  let attempts = 0;
-  while (attempts < 10) {
-    const existingAcc = await prisma.account.findUnique({
-      where: { accountNo: accountNumber },
-    });
-    if (!existingAcc) break;
-    accountNumber = Math.floor(10000000 + Math.random() * 90000000);
-    attempts++;
-  }
-
-  const hashedPassword = await hashPassword(data.password);
 
   try {
-    // Atomic Transaction for User + Account creation
+    // 1. Check if email or Aadhaar already registered
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [{ email: data.email.trim().toLowerCase() }, { aadhaarNo: data.aadhaarNo.trim() }],
+      },
+    });
+
+    if (existingUser) {
+      if (existingUser.email.toLowerCase() === data.email.trim().toLowerCase()) {
+        return { success: false, error: "An account with this email address already exists." };
+      }
+      return { success: false, error: "An account with this Aadhaar number already exists." };
+    }
+
+    // 2. Generate unique 8-digit account number
+    let accountNumber = Math.floor(10000000 + Math.random() * 90000000);
+    let attempts = 0;
+    while (attempts < 10) {
+      const existingAcc = await prisma.account.findUnique({
+        where: { accountNo: accountNumber },
+      });
+      if (!existingAcc) break;
+      accountNumber = Math.floor(10000000 + Math.random() * 90000000);
+      attempts++;
+    }
+
+    const hashedPassword = await hashPassword(data.password);
+
+    // 3. Atomic Transaction for User + Account creation
     const createdUser = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -124,7 +254,7 @@ export async function registerUser(data: {
       return user;
     });
 
-    // Send Welcome Email asynchronously
+    // 4. Send Welcome Email asynchronously
     sendWelcomeEmailAsync(createdUser.firstName, createdUser.email, accountNumber);
 
     return {
@@ -138,9 +268,30 @@ export async function registerUser(data: {
         balance: 0.0,
       },
     };
-  } catch (error) {
-    console.error("SignUp Error in Prisma:", error);
-    return { success: false, error: "Could not create account. Please try again." };
+  } catch (error: any) {
+    const errorMsg = String(error?.message || "");
+    console.error("SignUp Error in Prisma:", errorMsg);
+
+    // Self-healing: If tables don't exist yet, auto-create them and retry once
+    if (!hasRetried && (errorMsg.includes("does not exist") || errorMsg.includes("relation") || errorMsg.includes("Table"))) {
+      console.info("Tables missing in database. Auto-creating tables now...");
+      const initResult = await initDatabaseSchema();
+      if (initResult.success) {
+        return registerUser(data, true); // Retry registration
+      }
+    }
+
+    if (errorMsg.includes("Can't reach database") || errorMsg.includes("connect")) {
+      return {
+        success: false,
+        error: "Cannot connect to database. Please check that DATABASE_URL in Vercel is correct.",
+      };
+    }
+
+    return {
+      success: false,
+      error: `Signup failed: ${error?.message || "Please verify your input and try again."}`,
+    };
   }
 }
 
@@ -148,33 +299,41 @@ export async function registerUser(data: {
 // 3. Balance & Dashboard Data
 // -----------------------------------------------------------------------------
 export async function getBalance(accountNo: number): Promise<number> {
-  const account = await prisma.account.findUnique({
-    where: { accountNo },
-    select: { balance: true },
-  });
-  return account ? Number(account.balance) : 0.0;
+  try {
+    const account = await prisma.account.findUnique({
+      where: { accountNo },
+      select: { balance: true },
+    });
+    return account ? Number(account.balance) : 0.0;
+  } catch {
+    return 0.0;
+  }
 }
 
 export async function getDailyWithdrawalTotal(accountNo: number): Promise<number> {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
+  try {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
 
-  const endOfDay = new Date();
-  endOfDay.setHours(23, 59, 59, 999);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
 
-  const withdrawals = await prisma.transaction.aggregate({
-    _sum: { amount: true },
-    where: {
-      senderAccount: accountNo,
-      txType: "WITHDRAWAL",
-      createdAt: {
-        gte: startOfDay,
-        lte: endOfDay,
+    const withdrawals = await prisma.transaction.aggregate({
+      _sum: { amount: true },
+      where: {
+        senderAccount: accountNo,
+        txType: "WITHDRAWAL",
+        createdAt: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
       },
-    },
-  });
+    });
 
-  return withdrawals._sum.amount ? Number(withdrawals._sum.amount) : 0.0;
+    return withdrawals._sum.amount ? Number(withdrawals._sum.amount) : 0.0;
+  } catch {
+    return 0.0;
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -213,9 +372,9 @@ export async function processDeposit(
     });
 
     return { success: true, message: `Successfully deposited ₹${amount.toFixed(2)}` };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Deposit Error:", error);
-    return { success: false, message: "Failed to process deposit. Please try again." };
+    return { success: false, message: `Failed to process deposit: ${error?.message || "Try again"}` };
   }
 }
 
@@ -230,7 +389,6 @@ export async function processWithdraw(
     return { success: false, message: "Invalid amount." };
   }
 
-  // Daily Limit Rule
   const alreadyWithdrawn = await getDailyWithdrawalTotal(accountNo);
   const projectedTotal = alreadyWithdrawn + amount;
 
@@ -255,7 +413,6 @@ export async function processWithdraw(
         return false;
       }
 
-      // Deduct balance
       await tx.account.update({
         where: { accountNo },
         data: {
@@ -263,7 +420,6 @@ export async function processWithdraw(
         },
       });
 
-      // Record transaction
       await tx.transaction.create({
         data: {
           senderAccount: accountNo,
@@ -282,9 +438,9 @@ export async function processWithdraw(
     }
 
     return { success: true, message: `Successfully withdrew ₹${amount.toFixed(2)}` };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Withdrawal Error:", error);
-    return { success: false, message: "System error during withdrawal. Please try later." };
+    return { success: false, message: `System error during withdrawal: ${error?.message || "Try again"}` };
   }
 }
 
@@ -324,19 +480,16 @@ export async function processTransfer(
 
   try {
     await prisma.$transaction(async (tx) => {
-      // 1. Deduct sender
       await tx.account.update({
         where: { accountNo: fromAcc },
         data: { balance: { decrement: decAmount } },
       });
 
-      // 2. Credit recipient
       await tx.account.update({
         where: { accountNo: toAcc },
         data: { balance: { increment: decAmount } },
       });
 
-      // 3. Log transaction
       await tx.transaction.create({
         data: {
           senderAccount: fromAcc,
@@ -349,9 +502,9 @@ export async function processTransfer(
     });
 
     return { success: true, message: `Transfer Successful! Sent ₹${amount.toFixed(2)} to account ${toAcc}.` };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Transfer Error:", error);
-    return { success: false, message: "Database connection error during transfer. Please try again." };
+    return { success: false, message: `Database error during transfer: ${error?.message || "Please try again."}` };
   }
 }
 
@@ -376,8 +529,7 @@ export async function getTransactionHistory(accountNo: number): Promise<Transact
       remark: tx.remark,
       createdAt: tx.createdAt.toISOString(),
     }));
-  } catch (error) {
-    console.error("Statement Error:", error);
+  } catch {
     return [];
   }
 }
@@ -425,7 +577,6 @@ export async function recoverAccount(email: string): Promise<ServiceResponse> {
   });
 
   if (!user || user.accounts.length === 0) {
-    // Return friendly generic message for security
     return {
       success: true,
       message: "If an account exists with this email, recovery details have been sent.",

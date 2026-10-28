@@ -60,9 +60,8 @@ export default function SignUpPage() {
         return;
       }
 
-      // Automatically logged in -> redirect to dashboard
-      router.push("/dashboard");
-      router.refresh();
+      // Automatically logged in -> full navigation to ensure session cookie is sent
+      window.location.href = "/dashboard";
     } catch {
       setErrorMsg("Network error. Could not connect to banking server.");
       setLoading(false);

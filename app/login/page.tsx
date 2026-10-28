@@ -70,8 +70,7 @@ function LoginForm() {
       }
 
       // Successful login redirect to dashboard
-      router.push("/dashboard");
-      router.refresh();
+      window.location.href = "/dashboard";
     } catch {
       setErrorMsg("Network error. Could not connect to the banking server.");
       setLoading(false);
